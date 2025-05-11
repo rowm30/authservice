@@ -1,27 +1,23 @@
 package com.railmate.authservice.controller;
 
-import com.railmate.authservice.model.User;
-import com.railmate.authservice.repository.UserRepository;
+import com.railmate.authservice.model.*;
+import com.railmate.authservice.repository.*;
 import com.railmate.authservice.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.*;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+
+import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
 @RestController
 @RequestMapping("/token")
 public class TokenController {
 
-    @Autowired
-    private JwtUtil jwtUtil;
-
-    @Autowired
-    UserRepository userRepository;
+    @Autowired private JwtUtil jwtUtil;
+    @Autowired private UserRepository userRepository;
+    @Autowired private RoleRepository roleRepository;   //  FIX  need this
 
     @PostMapping("/validate")
     public ResponseEntity<?> validateToken(@RequestBody Map<String, String> payload) {
@@ -31,33 +27,33 @@ public class TokenController {
             boolean isValid = jwtUtil.validateToken(token, email);
             return ResponseEntity.ok(Map.of("valid", isValid, "email", email));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid token");
+            return ResponseEntity.status(UNAUTHORIZED)
+                    .body(Map.of("error","Invalid token"));
         }
     }
 
     @PostMapping("/generate")
     public ResponseEntity<?> generateToken(@RequestBody Map<String, String> payload) {
         String email = payload.get("email");
-        String role = payload.getOrDefault("role", "USER");
+        String roleStr = payload.getOrDefault("role", "USER");
 
-        // Save user if not exists
-        User user = userRepository.findByEmail(email).orElseGet(() -> {
-            User newUser = new User();
-            newUser.setEmail(email);
-            newUser.setName("Generated User");
-            newUser.setPicture("");
-            newUser.setRole(role);
-            return userRepository.save(newUser);
-        });
+        /*  FIX  resolve Role entity once, reuse. */
+        RoleName roleName = RoleName.valueOf(roleStr.toUpperCase());
+        Role role = roleRepository.findByName(roleName)
+                .orElseGet(() -> roleRepository.save(new Role(roleName)));
 
-        // Update role if needed
-        user.setRole(role);
+        // create or fetch user
+        User user = userRepository.findByEmail(email).orElseGet(User::new);
+        user.setEmail(email);
+        user.setName(user.getName() == null ? "Generated User" : user.getName());
+        user.setPicture(user.getPicture() == null ? "" : user.getPicture());
+
+        /*  FIX  ensure role is inside the Set<Role>. */
+        user.getRoles().add(role);
         userRepository.save(user);
 
-        // Generate JWT
+        // produce access token
         String token = jwtUtil.generateToken(email);
-
         return ResponseEntity.ok(Map.of("token", token));
     }
-
 }
